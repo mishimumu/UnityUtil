@@ -9,14 +9,21 @@ namespace UScroll
     [RequireComponent(typeof(SliderPageOutScrollView))]
     public sealed class SliderPageControl : MonoBehaviour
     {
-
+        public static bool isVerticalDrag;
+        public static bool isHozonticalDrag;
+        public static bool isNormal;
+        public static float startTime;
+        public static float endTime;
+        public static Vector3 startPos;
+        public static Vector3 endPos;
+        public static PagePos pagePos;
         private float sliderTime;
         private float sliderSpeed;
         public SliderPageOutScrollView scrollRect;
         public ScrollRect rect;
 
         private float scrollBarValue;
-        private bool isMove = false;
+        public static bool isMove = false;
         private float areaValue;
         private bool isPress;
         private float pressTime;
@@ -77,7 +84,7 @@ namespace UScroll
 
                 //scrollRect.horizontalScrollbar.value = CurrentPage / pageNumber;
             }
-
+            pagePos = PagePos.Center;
         }
 
         void Onchange(Vector2 pos)
@@ -112,6 +119,7 @@ namespace UScroll
         {
             // float time = 0;
             //  Debug.Log("================");
+            isNormal = false;
             isMove = true;
             scrollBarValue = value;
             this.isPlus = isPlus;
@@ -130,7 +138,7 @@ namespace UScroll
             //        rect.horizontalScrollbar.value -= target * curve.Evaluate(time * para);
             //    }
             //}
-           // yield return null;
+            // yield return null;
         }
 
 
@@ -174,13 +182,28 @@ namespace UScroll
                 //}
 
                 float distance = Mathf.Abs(rect.horizontalScrollbar.value - scrollBarValue);
-                Debug.LogWarning("外列表移动" + distance);
+               // Debug.LogWarning("外列表移动" + distance);
 
                 if (distance < 0.01f)
                 {
-                    scrollRect.horizontalScrollbar.value = scrollBarValue;
+                    rect.horizontalScrollbar.value = scrollBarValue;
                     isMove = false;
                     time = 0;
+                    isNormal = true;
+
+                    if (rect.horizontalScrollbar.value == 0)
+                    {
+                        pagePos = PagePos.Left;
+                    }
+                    else if (rect.horizontalScrollbar.value == 0.5f)
+                    {
+                        pagePos = PagePos.Center;
+
+                    }
+                    else if (rect.horizontalScrollbar.value == 1)
+                    {
+                        pagePos = PagePos.Right;
+                    }
                     return;
                 }
                 //while (rect.horizontalScrollbar.value != value || time > 10f)
