@@ -3,195 +3,182 @@ using System.Collections;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using System;
+using System.Collections.Generic;
+using System.IO;
 
 namespace UScroll
 {
     public class SliderPageScrollView : ScrollRect, IPointerDownHandler, IPointerUpHandler
     {
+        public static string src;
+        private static Dictionary<int, PointerEventData> pointerMap = new Dictionary<int, PointerEventData>();
+        [SerializeField]
+        private ScrollRect parentScrollRect;
+        private static bool isVerticalMove;
+        public static bool isHozonticalMove;
+        private static bool isDrag;
+        private static int id = -1;
+        private static List<int> touches = new List<int>();
 
-        //限制只能左右滑动或者上下滑动
-        private bool isVerticalDrag;
-        private bool isHozonticalDrag;
-
-        public SliderPageControl view;
-        public PointerEventData startData;
-        public PointerEventData endData;
-        public float startTime;
-        public float endTime;
-        public Vector3 startPos;
-        public Vector3 endPos;
-        public ScrollRect rect;
         protected override void Start()
         {
             base.Start();
-            //view = GetComponentInParent<SliderPageControl>();
-            //if (!view)
-            //{
-            //    Debug.LogError("SliderPageControl is no exit");
-            //}
-
-            // rect= transform.Find("Node").GetComponent<ScrollRect>();
-            rect = GameObject.Find("Node").GetComponent<ScrollRect>();
-            // Debug.Log(rect.name);
         }
 
-        protected virtual void OnChangePage()
+        public void Print()
         {
-            Debug.Log("刷新数据");
+            string path = Application.persistentDataPath + "/log.txt";
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+            File.WriteAllText(path, src);
         }
+
+        public static bool IsPress()
+        {
+            return touches.Count == 0 ? false : true;
+        }
+
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            //解决多点触控:一个控件多个按压和移动时多个控件多个按压
+            //微信的解决方案：第一按压a时，可以操作，当这个按压还在情况另外个按压b进来，那么上次按压a就无效了，新的按压b可以操作
+            //此时按压b离开，则按压a再次激活
+            //按压id：按压到屏幕上，分配一个id（从0开始，找到一个未使用的id）,并标记为使用，这个id不会被其他按压占有。弹起则释放这个id，重新标记为未使用
+            //当上一个按压离开后，需要更新下一个拖拽处理器的状态(onbegindrag)
+            id = eventData.pointerId;
+            if (!pointerMap.ContainsKey(id))
+            {
+                pointerMap.Add(id, eventData);
+            }
+
+            if (!touches.Contains(id))
+            {
+                touches.Add(eventData.pointerId);
+            }
+
+        }
+
 
         public override void OnBeginDrag(PointerEventData eventData)
         {
-            if (SliderPageControl.isHozonticalDrag)
+            if (id != eventData.pointerId) return;
+            isDrag = true;
+            if (isHozonticalMove)
             {
-                SliderPageControl.startTime = Time.realtimeSinceStartup;
-                rect.OnBeginDrag(eventData);//水平
+                parentScrollRect.OnBeginDrag(eventData);
             }
-            else if (SliderPageControl.isVerticalDrag)
+            else if (isVerticalMove)
             {
-                base.OnBeginDrag(eventData);//垂直方向
+                base.OnBeginDrag(eventData);
             }
             else
             {
                 if (Mathf.Abs(eventData.delta.x) >= Mathf.Abs(eventData.delta.y))
                 {
-                    SliderPageControl.isHozonticalDrag = true;
-                    SliderPageControl.isVerticalDrag = false;
-                    rect.OnBeginDrag(eventData);//水平
+                    isHozonticalMove = true;
+                    isVerticalMove = false;
+                    parentScrollRect.OnBeginDrag(eventData);
                 }
                 else
                 {
-                    SliderPageControl.isVerticalDrag = true;
-                    SliderPageControl.isHozonticalDrag = false;
-                    base.OnBeginDrag(eventData);//垂直方向
-
+                    isVerticalMove = true;
+                    isHozonticalMove = false;
+                    base.OnBeginDrag(eventData);
                 }
             }
-            SliderPageControl.startTime = Time.realtimeSinceStartup;
-
-            // // isVerticalDrag = true;
-            //   isHozonticalDrag = true;
         }
 
         public override void OnDrag(PointerEventData eventData)
         {
-            //if (Mathf.Abs(eventData.delta.x) >= Mathf.Abs(eventData.delta.y))
-            //{
-            //    if (isHozonticalDrag)
-            //    {
-            //        isVerticalDrag = false;
-            //        // Debug.Log("开始水平" + "_" + eventData.delta);
-            //        Debug.Log(string.Format("内部状态:{0},点击次数:{1},点击时间:{2},delta:{3},pointerId:{4},position:{5},pressPosition:{6}\n", "OnDrag", eventData.clickCount, eventData.clickTime, eventData.delta, eventData.pointerId, eventData.position, eventData.pressPosition));
-            //        //  view.scrollRect.OnDrag(eventData);
-            //        rect.OnDrag(eventData);
-            //    }
-            //}
-            //else
-            //{
-            //    if (isVerticalDrag)
-            //    {
-            //        isHozonticalDrag = false;
-            //        //  Debug.Log("开始垂直" + "_" + eventData.delta);
-            //        base.OnDrag(eventData);
-            //    }
-            //}
-            if (SliderPageControl.isHozonticalDrag)
-            {
-                rect.OnDrag(eventData);
+            if (id != eventData.pointerId) return;
 
-            }
-            else if (SliderPageControl.isVerticalDrag)
+            if (isHozonticalMove)
             {
+                Vector2 delta = eventData.delta;
+                if (Mathf.Abs(delta.y) > Mathf.Abs(delta.x))
+                    delta.x = delta.y;
+                delta.y = 0;
+                eventData.delta = delta;
+                parentScrollRect.OnDrag(eventData);
+            }
+            else if (isVerticalMove)
+            {
+                Vector2 delta = eventData.delta;
+                if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
+                    delta.y = delta.x;
+                delta.x = 0;
                 base.OnDrag(eventData);
             }
-            else
-            {
 
-            }
         }
 
         public override void OnEndDrag(PointerEventData eventData)
         {
-            /*
-            if (isHozonticalDrag)
+            if (touches.Count != 0) return;
+
+            isDrag = false;
+            if (isHozonticalMove)
             {
-                isHozonticalDrag = false;
-                endData = eventData;
-                endTime = Time.realtimeSinceStartup;
-                endPos = eventData.position;
-
-                Debug.Log(string.Format("状态:{0},点击次数:{1},点击时间:{2},delta:{3},pointerId:{4},position:{5},pressPosition:{6}\n", "OnEndDrag", eventData.clickCount, eventData.clickTime, eventData.delta, eventData.pointerId, eventData.position, eventData.pressPosition));
-                //Debug.Log("水平结束" + "_" + Math.Abs(startData.position.x - endData.position.x));
-                //Debug.Log("水平结束" + "_" + viewport.rect.width);
-                //Debug.Log("水平结束" + "_" + startPos);
-                //Debug.Log("水平结束" + "_" + endPos);
-                //Debug.Log("水平结束" + "_" + Math.Abs(startPos.x - endPos.x));
-
-                rect.OnEndDrag(eventData);
-                if (endTime - startTime < 0.3f || Math.Abs(startPos.x - endPos.x) > viewport.rect.width / 2)
-                {
-                    OnChangePage();
-                }
+                parentScrollRect.OnEndDrag(eventData);
             }
-            // view.scrollRect.OnEndDrag(eventData);
-            if (isVerticalDrag)
+            else if (isVerticalMove)
             {
-                isVerticalDrag = false;
-                Debug.Log("垂直结束" + "_" + eventData.selectedObject);
                 base.OnEndDrag(eventData);
             }
 
-    */
-            SliderPageControl.endTime = Time.realtimeSinceStartup;
-            if (SliderPageControl.isHozonticalDrag)
-            {
-                rect.OnEndDrag(eventData);
-            }
-            else if (SliderPageControl.isVerticalDrag)
-            {
-                base.OnEndDrag(eventData);
-            }
-            else
-            {
+            isVerticalMove = false;
 
-            }
+        }
+
+        public static void Refresh()
+        {
+            isHozonticalMove = false;
+            isVerticalMove = false;
+            isDrag = false;
+            id = -1;
         }
 
         public void OnPointerUp(PointerEventData eventData)
         {
-            // Debug.Log(string.Format("状态:{0},点击次数:{1},点击时间:{2},delta:{3},pointerId:{4},position:{5},pressPosition:{6}\n", "OnPointerUp", eventData.clickCount, eventData.clickTime, eventData.delta, eventData.pointerId, eventData.position, eventData.pressPosition));
-           // Debug.Log(string.Format("{0},{1}", "OnPointerUp", "内部"));
-            //   view.OnPointerUp(eventData);
-           // SliderPageControl.isVerticalDrag = false;
-        }
 
-        public void OnPointerDown(PointerEventData eventData)
-        {
-            //  Debug.Log(string.Format("状态:{0},点击次数:{1},点击时间:{2},delta:{3},pointerId:{4},position:{5},pressPosition:{6}\n", "OnPointerDown", eventData.clickCount, eventData.clickTime, eventData.delta, eventData.pointerId, eventData.position, eventData.pressPosition));
-          //  Debug.Log(string.Format("{0},{1}", "OnPointerDown", "内部"));
-            if (SliderPageControl.isNormal)
+            if (touches.Contains(eventData.pointerId))
             {
-                SliderPageControl.isHozonticalDrag = false;
-                SliderPageControl.isVerticalDrag = false;
+                touches.Remove(eventData.pointerId);
+            }
 
+            if (pointerMap.ContainsKey(eventData.pointerId))
+            {
+                pointerMap.Remove(eventData.pointerId);
+            }
+
+            if (touches.Count == 0)
+            {
+                id = -1;
+                if (!isDrag && isHozonticalMove)
+                {
+                    ((SliderPageOutScrollView)parentScrollRect).PointUp();
+                }
             }
             else
             {
-                SliderPageControl.isVerticalDrag = false;
+                if (id == eventData.pointerId)
+                {
+                    touches.Sort();
+                    id = touches[0];
+                    PointerEventData data;
+                    if (pointerMap.TryGetValue(id, out data))
+                    {
+                        OnBeginDrag(data);
+                    }
+                }
             }
-            //  view.OnPointerDown(eventData);
 
-            startData = eventData;
-            SliderPageControl.startPos = eventData.position;
-            SliderPageControl.isMove = false;
         }
+
     }
 
 }
 
-public enum PagePos
-{
-    Left,
-    Center,
-    Right
-}
+
