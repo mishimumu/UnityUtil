@@ -1,184 +1,199 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic;
+
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using System;
-using System.Collections.Generic;
+using System.Text;
 using System.IO;
 
 namespace UScroll
 {
-    public class SliderPageScrollView : ScrollRect, IPointerDownHandler, IPointerUpHandler
+    public class SliderPageOutScrollView : ScrollRect
     {
-        public static string src;
-        private static Dictionary<int, PointerEventData> pointerMap = new Dictionary<int, PointerEventData>();
-        [SerializeField]
-        private ScrollRect parentScrollRect;
-        private static bool isVerticalMove;
-        public static bool isHozonticalMove;
-        private static bool isDrag;
-        private static int id = -1;
-        private static List<int> touches = new List<int>();
-
-        protected override void Start()
+        private Vector3 startPos;
+        private Vector3 endPos;
+        private float scrollBarValue;
+        public float para = 6f;
+        public float time = 0;
+        public float targetValue;
+        public float origin;
+        public int total = 3;//3 or 4
+        public AnimationCurve curve;
+        public float dir;
+        public static float startTime;
+        public static float endTime;
+        public List<SliderPage> pages = new List<SliderPage>();
+        public float width = 2160f;
+        public event System.Action<float> FreshEvent;
+        public bool IsMove
         {
-            base.Start();
-        }
-
-        public void Print()
-        {
-            string path = Application.persistentDataPath + "/log.txt";
-            if (File.Exists(path))
+            get
             {
-                File.Delete(path);
-            }
-            File.WriteAllText(path, src);
-        }
-
-        public static bool IsPress()
-        {
-            return touches.Count == 0 ? false : true;
-        }
-
-        public void OnPointerDown(PointerEventData eventData)
-        {
-            //解决多点触控:一个控件多个按压和移动时多个控件多个按压
-            //微信的解决方案：第一按压a时，可以操作，当这个按压还在情况另外个按压b进来，那么上次按压a就无效了，新的按压b可以操作
-            //此时按压b离开，则按压a再次激活
-            //按压id：按压到屏幕上，分配一个id（从0开始，找到一个未使用的id）,并标记为使用，这个id不会被其他按压占有。弹起则释放这个id，重新标记为未使用
-            //当上一个按压离开后，需要更新下一个拖拽处理器的状态(onbegindrag)
-            id = eventData.pointerId;
-            if (!pointerMap.ContainsKey(id))
-            {
-                pointerMap.Add(id, eventData);
+                return SliderPageScrollView.isHozonticalMove;
             }
 
-            if (!touches.Contains(id))
+            set
             {
-                touches.Add(eventData.pointerId);
+                SliderPageScrollView.isHozonticalMove = value;
             }
+        }
+
+        protected override void Awake()
+        {
+            base.Awake();
+            pages = Calculate(total);
+        }
+
+        protected override void OnDestroy()
+        {
+            FreshEvent = null;
+        }
+
+        private SliderPage GetPage(float value)
+        {
+            foreach (var page in pages)
+            {
+                if (page.min <= value && page.max >= value)
+                {
+                    return page;
+                }
+            }
+            return null;
+        }
+
+        public static List<SliderPage> Calculate(int total, float para = 0.5f)
+        {
+            if (total < 3)
+            {
+                Debug.LogError("");
+                return null;
+            }
+            List<SliderPage> pages = new List<SliderPage>();
+            float space = 1 / (float)(total - 1);
+
+            for (int i = 0; i < total; i++)
+            {
+                float bar = i * space;
+                float min = bar - space * para <= 0 ? 0 : bar - space * para;
+                float max = bar + space * para >= 1 ? 1 : bar + space * para;
+                SliderPage page = new SliderPage(bar, min, max, i, space);
+                pages.Add(page);
+            }
+
+            return pages;
 
         }
 
+        public void Fresh()
+        {
+            if (FreshEvent != null)
+            {
+                FreshEvent(horizontalScrollbar.value);
+            }
+        }
+
+        protected override void LateUpdate()
+        {
+            base.LateUpdate();
+            if (IsMove && !SliderPageScrollView.IsPress())
+            {
+                time += Time.deltaTime;
+                float distance = Mathf.Abs(horizontalScrollbar.value - scrollBarValue);
+
+                if (distance < 0.01f)
+                {
+                    horizontalScrollbar.value = scrollBarValue;
+                    IsMove = false;
+                    time = 0;
+                    return;
+                }
+                float value = dir * targetValue * curve.Evaluate(time * para);
+                horizontalScrollbar.value = origin + value;
+                Fresh();
+            }
+        }
+
+
+        public void CalculateMovement(float value)
+        {
+            scrollBarValue = value;
+            time = 0;
+            origin = horizontalScrollbar.value;
+            targetValue = Mathf.Abs(horizontalScrollbar.value - scrollBarValue);
+        }
 
         public override void OnBeginDrag(PointerEventData eventData)
         {
-            if (id != eventData.pointerId) return;
-            isDrag = true;
-            if (isHozonticalMove)
-            {
-                parentScrollRect.OnBeginDrag(eventData);
-            }
-            else if (isVerticalMove)
-            {
-                base.OnBeginDrag(eventData);
-            }
-            else
-            {
-                if (Mathf.Abs(eventData.delta.x) >= Mathf.Abs(eventData.delta.y))
-                {
-                    isHozonticalMove = true;
-                    isVerticalMove = false;
-                    parentScrollRect.OnBeginDrag(eventData);
-                }
-                else
-                {
-                    isVerticalMove = true;
-                    isHozonticalMove = false;
-                    base.OnBeginDrag(eventData);
-                }
-            }
+            startTime = Time.realtimeSinceStartup;
+            startPos = eventData.position;
+            base.OnBeginDrag(eventData);
         }
 
         public override void OnDrag(PointerEventData eventData)
         {
-            if (id != eventData.pointerId) return;
-
-            if (isHozonticalMove)
+            //if ((horizontalScrollbar.value == 0 && eventData.delta.x >= 0) || (horizontalScrollbar.value == 1 && eventData.delta.x <= 0))
+            //{
+            //    //屏幕两边外不处理
+            //}
+            //else
+            //{
+            //base.OnDrag(eventData);
+            //if (horizontalScrollbar.value == 0 && content.localPosition.x > 0)
+            //{
+            //    content.anchoredPosition3D = Vector3.zero;
+            //}
+            //else if (horizontalScrollbar.value == 1 && content.localPosition.x < -width)
+            //{
+            //    content.anchoredPosition3D = new Vector3(-width, 0, 0);
+            //}
+            //}
+            base.OnDrag(eventData);
+            if (horizontalScrollbar.value == 0 && content.localPosition.x > 0)
             {
-                Vector2 delta = eventData.delta;
-                if (Mathf.Abs(delta.y) > Mathf.Abs(delta.x))
-                    delta.x = delta.y;
-                delta.y = 0;
-                eventData.delta = delta;
-                parentScrollRect.OnDrag(eventData);
+                content.anchoredPosition3D = Vector3.zero;
             }
-            else if (isVerticalMove)
+            else if (horizontalScrollbar.value == 1 && content.localPosition.x < -width)
             {
-                Vector2 delta = eventData.delta;
-                if (Mathf.Abs(delta.x) > Mathf.Abs(delta.y))
-                    delta.y = delta.x;
-                delta.x = 0;
-                base.OnDrag(eventData);
+                content.anchoredPosition3D = new Vector3(-width, 0, 0);
             }
-
+            Fresh();
         }
 
         public override void OnEndDrag(PointerEventData eventData)
         {
-            if (touches.Count != 0) return;
+            base.OnEndDrag(eventData);
+            endTime = Time.realtimeSinceStartup;
+            endPos = eventData.position;
 
-            isDrag = false;
-            if (isHozonticalMove)
+            float deltaX = endPos.x - startPos.x;
+
+            SliderPage page = GetPage(horizontalScrollbar.value);
+            if (deltaX != 0 && ((endTime - startTime < 0.3f) || (Mathf.Abs(deltaX) > viewport.rect.width / 2)))
             {
-                parentScrollRect.OnEndDrag(eventData);
-            }
-            else if (isVerticalMove)
-            {
-                base.OnEndDrag(eventData);
-            }
-
-            isVerticalMove = false;
-
-        }
-
-        public static void Refresh()
-        {
-            isHozonticalMove = false;
-            isVerticalMove = false;
-            isDrag = false;
-            id = -1;
-        }
-
-        public void OnPointerUp(PointerEventData eventData)
-        {
-
-            if (touches.Contains(eventData.pointerId))
-            {
-                touches.Remove(eventData.pointerId);
-            }
-
-            if (pointerMap.ContainsKey(eventData.pointerId))
-            {
-                pointerMap.Remove(eventData.pointerId);
-            }
-
-            if (touches.Count == 0)
-            {
-                id = -1;
-                if (!isDrag && isHozonticalMove)
-                {
-                    ((SliderPageOutScrollView)parentScrollRect).PointUp();
-                }
+                dir = -deltaX / Mathf.Abs(deltaX);
+                int index = page.index;
+                int nextPage = dir > 0 ? index == total - 1 ? total - 1 : index + (int)dir : index == 0 ? 0 : index + (int)dir;
+                CalculateMovement(pages[nextPage].bar);
             }
             else
             {
-                if (id == eventData.pointerId)
-                {
-                    touches.Sort();
-                    id = touches[0];
-                    PointerEventData data;
-                    if (pointerMap.TryGetValue(id, out data))
-                    {
-                        OnBeginDrag(data);
-                    }
-                }
+                dir = horizontalScrollbar.value >= page.bar ? -1 : 1;
+                CalculateMovement(page.bar);
             }
 
         }
+
+        public void PointUp()
+        {
+            SliderPage page = GetPage(horizontalScrollbar.value);
+            dir = horizontalScrollbar.value >= page.bar ? -1 : 1;
+            CalculateMovement(page.bar);
+        }
+
+
 
     }
 
 }
-
-
